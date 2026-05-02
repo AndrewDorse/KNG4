@@ -2,6 +2,8 @@
 
 Live engine for **PRST1** (Polymarket **BTC 15m** Up/Down): tight-band **UP** scalp when Binance-implied fair value exceeds the CLOB UP midpoint by `PRST1_OPEN_EDGE`, with take-profit / time-stop from backtested sim semantics.
 
+**Default parameters** match the **1000-window sweep rank #1** profile: `oe=0.065`, `mn=0.065`, band `[0.32,0.68]`, `hold=135`, `σ=130`, `slip=0.008`, `cd=2`, `max=6` trades/window, `$1` notional (`PRST1_NOTIONAL_USD=1`).
+
 This repo is **standalone** from `kng_bot3` / KNG3. Strategy research lived under `kng_bot3` (`PALADIN/sim_pm_btc_scalp_no_settle.py`).
 
 ## Quick start (local)

@@ -89,7 +89,7 @@ class Prst1Settings:
             band_lo=_env_float("PRST1_BAND_LO", 0.32),
             band_hi=_env_float("PRST1_BAND_HI", 0.68),
             sigma=_env_float("PRST1_SIGMA_BTC", 130.0),
-            slip_model=_env_float("PRST1_SLIP_MODEL", 0.012),
+            slip_model=_env_float("PRST1_SLIP_MODEL", 0.008),
             max_hold_sec=_env_float("PRST1_MAX_HOLD_SEC", 135.0),
             max_trades_per_window=_env_int("PRST1_MAX_TRADES_PER_WINDOW", 6),
             cooldown_sec=_env_float("PRST1_COOLDOWN_SEC", 2.0),

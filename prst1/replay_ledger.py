@@ -196,7 +196,7 @@ def main() -> int:
     ap.add_argument("--band-lo", type=float, default=0.32)
     ap.add_argument("--band-hi", type=float, default=0.68)
     ap.add_argument("--sigma", type=float, default=130.0)
-    ap.add_argument("--slip", type=float, default=0.012)
+    ap.add_argument("--slip", type=float, default=0.008)
     ap.add_argument("--max-hold-sec", type=float, default=135.0)
     ap.add_argument("--max-trades", type=int, default=6)
     ap.add_argument("--cooldown-sec", type=float, default=2.0)
