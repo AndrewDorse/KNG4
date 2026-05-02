@@ -1,0 +1,9 @@
+# KNG4 PRST1 — copy .env.example to .env, then:
+#   docker compose --env-file .env up --build
+services:
+  prst1:
+    build: .
+    image: kng4-prst1:local
+    restart: unless-stopped
+    environment:
+      POLY_DRY_RUN: "${POLY_DRY_RUN:-true}"
