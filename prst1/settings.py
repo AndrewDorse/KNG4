@@ -36,6 +36,31 @@ def _env_bool(name: str, default: bool) -> bool:
     return raw.lower() in ("1", "true", "yes", "y", "on")
 
 
+def _parse_window_minutes_list(raw: str | None) -> tuple[int, ...]:
+    """Comma-separated window lengths, e.g. ``5,15`` → simultaneous 5m and 15m BTC up/down."""
+    s = _strip(raw)
+    if not s:
+        return (5, 15)
+    out: list[int] = []
+    for part in s.split(","):
+        p = part.strip()
+        if not p:
+            continue
+        try:
+            v = int(float(p))
+        except ValueError as exc:
+            raise Prst1ConfigError(
+                f"PRST1_WINDOW_MINUTES must be comma-separated integers (got {raw!r})"
+            ) from exc
+        if v <= 0:
+            continue
+        if v not in out:
+            out.append(v)
+    if not out:
+        return (5, 15)
+    return tuple(out)
+
+
 @dataclass(frozen=True, slots=True)
 class Prst1Settings:
     private_key: str
@@ -51,7 +76,7 @@ class Prst1Settings:
     new_order_cutoff_seconds: int
     market_symbol: str
     btc_feed_symbol: str
-    window_minutes: int
+    window_minutes_list: tuple[int, ...]
     notional_usd: float
     open_edge: float
     min_net: float
@@ -88,7 +113,7 @@ class Prst1Settings:
             ),
             market_symbol=_strip(os.getenv("PRST1_MARKET_SYMBOL")) or "BTC",
             btc_feed_symbol=(_strip(os.getenv("PRST1_BTC_FEED_SYMBOL")) or "BTCUSDT").upper(),
-            window_minutes=_env_int("PRST1_WINDOW_MINUTES", 15),
+            window_minutes_list=_parse_window_minutes_list(os.getenv("PRST1_WINDOW_MINUTES")),
             notional_usd=_env_float("PRST1_NOTIONAL_USD", 1.0),
             open_edge=_env_float("PRST1_OPEN_EDGE", 0.065),
             min_net=_env_float("PRST1_MIN_NET", 0.065),
@@ -97,7 +122,9 @@ class Prst1Settings:
             sigma=_env_float("PRST1_SIGMA_BTC", 130.0),
             slip_model=_env_float("PRST1_SLIP_MODEL", 0.008),
             max_hold_sec=_env_float("PRST1_MAX_HOLD_SEC", 135.0),
-            max_trades_per_window=_env_int("PRST1_MAX_TRADES_PER_WINDOW", 6),
+            max_trades_per_window=max(
+                1, min(50, _env_int("PRST1_MAX_TRADES_PER_WINDOW", 10))
+            ),
             cooldown_sec=_env_float("PRST1_COOLDOWN_SEC", 2.0),
             log_level=_strip(os.getenv("PRST1_LOG_LEVEL")) or "INFO",
         )

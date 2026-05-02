@@ -1,4 +1,4 @@
-"""PRST1 live loop: BTC Up/Down UP token scalp (tight band vs implied fair)."""
+"""PRST1 live loop: one lane per window length (e.g. 5m + 15m BTC up/down in parallel)."""
 
 from __future__ import annotations
 
@@ -33,6 +33,14 @@ class _WindowState:
     open_: OpenLeg | None = None
 
 
+@dataclass
+class _LaneState:
+    """One PM window length (5m or 15m): at most one open UP leg; up to N completed entries per slug."""
+
+    w: _WindowState
+    open_up: TokenMarket | None = None
+
+
 class Prst1LiveEngine:
     def __init__(self, settings: Prst1Settings) -> None:
         self.s = settings
@@ -44,44 +52,55 @@ class Prst1LiveEngine:
             relayer_secret=settings.relayer_secret,
             relayer_passphrase=settings.relayer_passphrase,
         )
-        self._w = _WindowState()
-        self._open_up: TokenMarket | None = None
+        self._lanes: dict[int, _LaneState] = {
+            wm: _LaneState(w=_WindowState(), open_up=None)
+            for wm in settings.window_minutes_list
+        }
 
-    def _init_start_btc(self, slug: str) -> None:
+    def _lane(self, wm: int) -> _LaneState:
+        if wm not in self._lanes:
+            self._lanes[wm] = _LaneState(w=_WindowState(), open_up=None)
+        return self._lanes[wm]
+
+    def _init_start_btc(self, lane: _LaneState, slug: str, wm: int) -> None:
         ts = window_start_ts_from_slug(slug)
         ob: float | None = None
         if ts is not None:
             ob = fetch_binance_window_open_btc(
                 symbol=self.s.btc_feed_symbol,
                 window_start_sec=ts,
-                window_minutes=self.s.window_minutes,
+                window_minutes=wm,
                 timeout=self.s.request_timeout_seconds,
             )
         if ob is None or ob <= 0:
             ob = fetch_binance_btcusdt(
                 self.s.request_timeout_seconds, symbol=self.s.btc_feed_symbol
             )
-        self._w.start_btc = ob
+        lane.w.start_btc = ob
         LOGGER.info(
-            "PRST1 start_btc=%s slug=%s (window-open kline or spot fallback)",
+            "PRST1[%dm] start_btc=%s slug=%s (window-open kline or spot fallback)",
+            wm,
             f"{ob:.2f}" if ob else "None",
             slug,
         )
 
-    def _flatten(self, up: TokenMarket, slug_log: str, reason: str) -> None:
-        if self._w.open_ is None:
-            self._open_up = None
+    def _flatten_lane(
+        self, lane: _LaneState, up: TokenMarket, slug_log: str, reason: str, wm: int
+    ) -> None:
+        if lane.w.open_ is None:
+            lane.open_up = None
             return
-        sh = self._w.open_.shares
+        sh = lane.w.open_.shares
         if sh <= 0:
-            self._w.open_ = None
-            self._open_up = None
+            lane.w.open_ = None
+            lane.open_up = None
             return
         bid = self._clob.get_best_bid(up.token_id)
         px = max(0.01, min(0.99, (bid or 0.01) - 0.01))
         if self.s.dry_run:
             LOGGER.info(
-                "PRST1 DRY flatten slug=%s sh=%.4f px<=%.2f (%s)",
+                "PRST1[%dm] DRY flatten slug=%s sh=%.4f px<=%.2f (%s)",
+                wm,
                 slug_log,
                 sh,
                 px,
@@ -91,38 +110,45 @@ class Prst1LiveEngine:
             try:
                 self._clob.marketable_sell(up, 0.01, sh)
                 LOGGER.info(
-                    "PRST1 sell UP slug=%s sh=%.4f aggressive<=0.01 (%s)",
+                    "PRST1[%dm] sell UP slug=%s sh=%.4f aggressive<=0.01 (%s)",
+                    wm,
                     slug_log,
                     sh,
                     reason,
                 )
             except Exception as exc:  # noqa: BLE001
-                LOGGER.exception("PRST1 flatten failed: %s", exc)
-        self._w.open_ = None
-        self._open_up = None
+                LOGGER.exception("PRST1[%dm] flatten failed: %s", wm, exc)
+        lane.w.open_ = None
+        lane.open_up = None
 
-    def tick_once(self) -> None:
+    def _tick_lane(self, wm: int) -> None:
+        lane = self._lane(wm)
+        wst = lane.w
+
         c = discover_active_btc_window(
             market_symbol=self.s.market_symbol,
-            window_minutes=self.s.window_minutes,
+            window_minutes=wm,
             timeout=self.s.request_timeout_seconds,
         )
         if c is None:
             return
 
-        slug_changed = self._w.slug is None or self._w.slug != c.slug
+        slug_changed = wst.slug is None or wst.slug != c.slug
         if slug_changed:
-            if self._w.open_ is not None and self._open_up is not None:
-                self._flatten(self._open_up, self._w.slug or c.slug, "WINDOW_ROLL")
-            self._w = _WindowState(slug=c.slug, trades=0, next_trade_mono=0.0)
-            self._open_up = None
-            self._init_start_btc(c.slug)
+            if wst.open_ is not None and lane.open_up is not None:
+                self._flatten_lane(
+                    lane, lane.open_up, wst.slug or c.slug, "WINDOW_ROLL", wm
+                )
+            lane.w = _WindowState(slug=c.slug, trades=0, next_trade_mono=0.0)
+            lane.open_up = None
+            wst = lane.w
+            self._init_start_btc(lane, c.slug, wm)
 
         now = time.time()
         rem = c.end_time.timestamp() - now
         if rem <= float(self.s.force_exit_before_end_seconds):
-            if self._w.open_ is not None and self._open_up is not None:
-                self._flatten(self._open_up, c.slug, "force_exit_window")
+            if wst.open_ is not None and lane.open_up is not None:
+                self._flatten_lane(lane, lane.open_up, c.slug, "force_exit_window", wm)
             return
 
         up_mid = self._clob.get_midpoint(c.up.token_id)
@@ -132,36 +158,36 @@ class Prst1LiveEngine:
         if btc is None or up_mid is None:
             return
 
-        if self._w.start_btc is None:
-            self._init_start_btc(c.slug)
+        if wst.start_btc is None:
+            self._init_start_btc(lane, c.slug, wm)
 
-        st = self._w.start_btc
+        st = wst.start_btc
         if st is None or st <= 0:
             return
 
-        # --- manage open leg ---
-        if self._w.open_ is not None:
+        # --- at most one open deal per lane; exit on TP or timeout then allow next ---
+        if wst.open_ is not None:
             mid = self._clob.get_midpoint(c.up.token_id)
             if mid is None:
                 return
             mono = time.monotonic()
-            up_tok = self._open_up or c.up
+            up_tok = lane.open_up or c.up
             if should_take_profit(
-                open_=self._w.open_,
+                open_=wst.open_,
                 up_mid=mid,
                 slip=self.s.slip_model,
                 min_net=self.s.min_net,
             ) or should_time_stop(
-                open_=self._w.open_, now_mono=mono, max_hold_sec=self.s.max_hold_sec
+                open_=wst.open_, now_mono=mono, max_hold_sec=self.s.max_hold_sec
             ):
-                self._flatten(up_tok, c.slug, "tp_or_time")
-                self._w.next_trade_mono = mono + self.s.cooldown_sec
+                self._flatten_lane(lane, up_tok, c.slug, "tp_or_time", wm)
+                wst.next_trade_mono = mono + self.s.cooldown_sec
             return
 
-        # --- new entry ---
-        if self._w.trades >= self.s.max_trades_per_window:
+        # --- new $1 entry (max completed entries per window slug) ---
+        if wst.trades >= self.s.max_trades_per_window:
             return
-        if time.monotonic() < self._w.next_trade_mono:
+        if time.monotonic() < wst.next_trade_mono:
             return
         if rem <= float(self.s.new_order_cutoff_seconds):
             return
@@ -182,49 +208,65 @@ class Prst1LiveEngine:
 
         if self.s.dry_run:
             LOGGER.info(
-                "PRST1 DRY BUY signal slug=%s up_mid=%.4f btc=%.2f trade#%d est_sh=%.3f entry~%.4f",
+                "PRST1[%dm] DRY BUY slug=%s up_mid=%.4f btc=%.2f trade#%d/%d est_sh=%.3f entry~%.4f",
+                wm,
                 c.slug,
                 up_mid,
                 btc,
-                self._w.trades + 1,
+                wst.trades + 1,
+                self.s.max_trades_per_window,
                 est_sh,
                 entry_buy,
             )
-            self._w.open_ = OpenLeg(
+            wst.open_ = OpenLeg(
                 entry_buy=entry_buy,
                 entry_mono=time.monotonic(),
                 shares=float(f"{est_sh:.4f}"),
             )
-            self._open_up = c.up
-            self._w.trades += 1
+            lane.open_up = c.up
+            wst.trades += 1
             return
 
         try:
             self._clob.market_buy_usdc(c.up, self.s.notional_usd)
         except Exception as exc:  # noqa: BLE001
-            LOGGER.warning("PRST1 buy failed: %s", exc)
+            LOGGER.warning("PRST1[%dm] buy failed slug=%s err=%s", wm, c.slug, exc)
             return
 
-        self._w.open_ = OpenLeg(
+        wst.open_ = OpenLeg(
             entry_buy=entry_buy,
             entry_mono=time.monotonic(),
             shares=float(f"{est_sh:.4f}"),
         )
-        self._open_up = c.up
-        self._w.trades += 1
+        lane.open_up = c.up
+        wst.trades += 1
         LOGGER.info(
-            "PRST1 BUY UP slug=%s notional=%.2f USDC est_sh=%.4f entry_model=%.4f",
+            "PRST1[%dm] BUY UP slug=%s notional=%.2f USDC est_sh=%.4f entry_model=%.4f trade#%d/%d",
+            wm,
             c.slug,
             self.s.notional_usd,
             est_sh,
             entry_buy,
+            wst.trades,
+            self.s.max_trades_per_window,
         )
 
+    def tick_once(self) -> None:
+        for wm in self.s.window_minutes_list:
+            try:
+                self._tick_lane(int(wm))
+            except Exception:  # noqa: BLE001
+                LOGGER.exception("PRST1[%dm] tick error", int(wm))
+
     def run_forever(self) -> None:
+        lanes_s = ",".join(f"{m}m" for m in self.s.window_minutes_list)
         LOGGER.info(
-            "PRST1 engine started dry_run=%s poll=%.2fs band=[%.2f,%.2f] sigma=%.1f btc=%s",
+            "PRST1 v1 lanes=%s dry_run=%s poll=%.2fs $%.2f/trade max=%d/window/lane band=[%.2f,%.2f] sigma=%.1f btc=%s",
+            lanes_s,
             self.s.dry_run,
             self.s.poll_interval_seconds,
+            self.s.notional_usd,
+            self.s.max_trades_per_window,
             self.s.band_lo,
             self.s.band_hi,
             self.s.sigma,
@@ -234,7 +276,7 @@ class Prst1LiveEngine:
             try:
                 self.tick_once()
             except Exception:  # noqa: BLE001
-                LOGGER.exception("PRST1 tick error")
+                LOGGER.exception("PRST1 tick_once error")
             time.sleep(self.s.poll_interval_seconds)
 
 

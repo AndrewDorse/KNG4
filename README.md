@@ -1,8 +1,10 @@
 # KNG4 — PRST1
 
-Live engine for **PRST1** (Polymarket **BTC 15m** Up/Down): tight-band **UP** scalp when Binance-implied fair value exceeds the CLOB UP midpoint by `PRST1_OPEN_EDGE`, with take-profit / time-stop from backtested sim semantics.
+Live engine for **PRST1** (Polymarket **BTC** Up/Down): by default **5m and 15m windows run in parallel** (separate Gamma slugs, separate state). Each lane keeps **at most one open UP position**, **`PRST1_NOTIONAL_USD` per entry** (default **$1**), and allows the next entry after TP or timeout until **`PRST1_MAX_TRADES_PER_WINDOW`** (default **10**) entries per window slug.
 
-**Default parameters** match the **1000-window sweep rank #1** profile: `oe=0.065`, `mn=0.065`, band `[0.32,0.68]`, `hold=135`, `σ=130`, `slip=0.008`, `cd=2`, `max=6` trades/window, `$1` notional (`PRST1_NOTIONAL_USD=1`).
+Tight-band **UP** scalp when Binance-implied fair exceeds the CLOB UP mid by `PRST1_OPEN_EDGE`, with take-profit / time-stop matching the research sim.
+
+**Default parameters** match the **1000-window sweep rank #1** profile: `oe=0.065`, `mn=0.065`, band `[0.32,0.68]`, `hold=135`, `σ=130`, `slip=0.008`, `cd=2`, `max=10` trades/window **per lane**, `$1` notional (`PRST1_NOTIONAL_USD=1`). Set `PRST1_WINDOW_MINUTES=15` for 15m-only.
 
 This repo is **standalone**: **KNG3** ships **SHAMAN v1** only; **KNG4** is the Docker home for **PRST1** (price-difference / tight-band UP scalp). Strategy research lives under `kng_bot3` (`PALADIN/sim_pm_btc_scalp_no_settle.py`).
 

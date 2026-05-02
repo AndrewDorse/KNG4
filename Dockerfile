@@ -1,4 +1,4 @@
-# KNG4 — PRST1 Polymarket BTC 15m scalp (dry-run capable)
+# KNG4 — PRST1 Polymarket BTC up/down scalp (default 5m+15m lanes, dry-run capable)
 FROM python:3.12-slim-bookworm
 
 WORKDIR /app
