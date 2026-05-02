@@ -107,17 +107,30 @@ class Prst1LiveEngine:
                 reason,
             )
         else:
-            try:
-                self._clob.marketable_sell(up, 0.01, sh)
-                LOGGER.info(
-                    "PRST1[%dm] sell UP slug=%s sh=%.4f aggressive<=0.01 (%s)",
+            bal = self._clob.token_balance_allowance_refreshed(up.token_id)
+            sell_sh = min(float(sh), float(bal)) if bal > 1e-8 else 0.0
+            if sell_sh <= 1e-6:
+                LOGGER.warning(
+                    "PRST1[%dm] flatten skip zero_balance slug=%s ledger_sh=%.4f api_sh=%.6f (%s)",
                     wm,
                     slug_log,
                     sh,
+                    bal,
                     reason,
                 )
-            except Exception as exc:  # noqa: BLE001
-                LOGGER.exception("PRST1[%dm] flatten failed: %s", wm, exc)
+            else:
+                try:
+                    self._clob.marketable_sell(up, 0.01, sell_sh)
+                    LOGGER.info(
+                        "PRST1[%dm] sell UP slug=%s sh=%.4f (api_sh=%.4f) aggressive<=0.01 (%s)",
+                        wm,
+                        slug_log,
+                        sh,
+                        sell_sh,
+                        reason,
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    LOGGER.exception("PRST1[%dm] flatten failed: %s", wm, exc)
         lane.w.open_ = None
         lane.open_up = None
 
@@ -191,6 +204,18 @@ class Prst1LiveEngine:
             return
         if rem <= float(self.s.new_order_cutoff_seconds):
             return
+        if not self.s.dry_run:
+            need = float(self.s.notional_usd) * 1.02
+            bal = self._clob.wallet_balance_usdc()
+            if bal < need:
+                LOGGER.warning(
+                    "PRST1[%dm] skip BUY insufficient_collateral have=$%.2f need≈$%.2f slug=%s",
+                    wm,
+                    bal,
+                    need,
+                    c.slug,
+                )
+                return
         if not signal_buy_up(
             up_mid=up_mid,
             btc=btc,
@@ -261,14 +286,18 @@ class Prst1LiveEngine:
     def run_forever(self) -> None:
         lanes_s = ",".join(f"{m}m" for m in self.s.window_minutes_list)
         LOGGER.info(
-            "PRST1 v1 lanes=%s dry_run=%s poll=%.2fs $%.2f/trade max=%d/window/lane band=[%.2f,%.2f] sigma=%.1f btc=%s",
+            "PRST1 v1 lanes=%s dry_run=%s poll=%.2fs $%.2f/trade max=%d/window/lane "
+            "TP_min_net=%.3f slip=%.3f band=[%.2f,%.2f] oe=%.3f sigma=%.1f btc=%s | CLOB=v2",
             lanes_s,
             self.s.dry_run,
             self.s.poll_interval_seconds,
             self.s.notional_usd,
             self.s.max_trades_per_window,
+            self.s.min_net,
+            self.s.slip_model,
             self.s.band_lo,
             self.s.band_hi,
+            self.s.open_edge,
             self.s.sigma,
             self.s.btc_feed_symbol,
         )

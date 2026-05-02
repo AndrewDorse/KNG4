@@ -116,7 +116,7 @@ class Prst1Settings:
             window_minutes_list=_parse_window_minutes_list(os.getenv("PRST1_WINDOW_MINUTES")),
             notional_usd=_env_float("PRST1_NOTIONAL_USD", 1.0),
             open_edge=_env_float("PRST1_OPEN_EDGE", 0.065),
-            min_net=_env_float("PRST1_MIN_NET", 0.065),
+            min_net=_env_float("PRST1_MIN_NET", 0.12),
             band_lo=_env_float("PRST1_BAND_LO", 0.32),
             band_hi=_env_float("PRST1_BAND_HI", 0.68),
             sigma=_env_float("PRST1_SIGMA_BTC", 130.0),

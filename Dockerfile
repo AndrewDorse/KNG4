@@ -11,6 +11,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY prst1/ ./prst1/
 
+RUN mkdir -p /app/logs
+
 ENV PYTHONUNBUFFERED=1
 ENV PYTHONPATH=/app
 

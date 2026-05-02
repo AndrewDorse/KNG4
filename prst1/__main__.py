@@ -21,6 +21,12 @@ def main() -> int:
         print(f"Config error: {exc}", file=sys.stderr)
         return 2
     configure_logging(settings.log_level)
+    # Importing engine loads ``clob_shim`` → ``py_clob_client_v2`` (fails fast if missing).
+    print(
+        f"PRST1 boot: CLOB=py_clob_client_v2 | lanes={settings.window_minutes_list} "
+        f"min_net={settings.min_net} notional=${settings.notional_usd:.2f} dry_run={settings.dry_run}",
+        flush=True,
+    )
     Prst1LiveEngine(settings).run_forever()
     return 0
 

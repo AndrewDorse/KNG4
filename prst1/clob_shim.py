@@ -1,8 +1,12 @@
-"""Minimal Polymarket CLOB wrapper for PRST1 (midpoint + FAK buy/sell)."""
+"""Polymarket CLOB — **py_clob_client_v2 only** (market FAK buys, FAK sells, book, balances).
+
+PM **UP** mid: ``get_order_book`` via CLOB (best bid / best ask). BTC: public Binance REST (see
+``fetch_binance_*``). No v1 fallback: install ``py_clob_client_v2`` per ``requirements.txt``."""
 
 from __future__ import annotations
 
 import logging
+import threading
 import time
 from decimal import ROUND_DOWN, Decimal
 from typing import Any
@@ -16,34 +20,33 @@ LOGGER = logging.getLogger("prst1")
 HOST = "https://clob.polymarket.com"
 CHAIN_ID = 137
 
-try:
-    from py_clob_client_v2 import (
-        ApiCreds,
-        AssetType,
-        BalanceAllowanceParams,
-        ClobClient,
-        MarketOrderArgs,
-        OrderArgs,
-        OrderType,
-        PartialCreateOrderOptions,
-        Side,
-    )
+from py_clob_client_v2 import (  # noqa: E402  — v2 required for live trading
+    ApiCreds,
+    AssetType,
+    BalanceAllowanceParams,
+    ClobClient,
+    MarketOrderArgs,
+    OrderArgs,
+    OrderType,
+    PartialCreateOrderOptions,
+    Side,
+)
 
-    _V2 = True
-except Exception:  # noqa: BLE001
-    from py_clob_client.client import ClobClient
-    from py_clob_client.clob_types import (
-        ApiCreds,
-        AssetType,
-        BalanceAllowanceParams,
-        MarketOrderArgs,
-        OrderArgs,
-        OrderType,
-        PartialCreateOrderOptions,
-    )
 
-    Side = None
-    _V2 = False
+def _parse_balance_allowance(resp: Any) -> float:
+    if isinstance(resp, dict):
+        raw = resp.get("balance")
+    else:
+        raw = getattr(resp, "balance", None) or resp
+    if raw is None or raw == "":
+        return 0.0
+    try:
+        v = float(raw)
+    except (TypeError, ValueError):
+        return 0.0
+    if v > 1_000_000:
+        return v / 1_000_000.0
+    return v
 
 
 def _clob_taker_size_shares(size: float) -> float:
@@ -61,6 +64,8 @@ def _norm_tick(raw: str | None) -> str | None:
 
 
 class Prst1Clob:
+    """Single-flight taker orders + v2-native market buy/sell (FAK), matching KNG3 patterns."""
+
     def __init__(
         self,
         *,
@@ -71,15 +76,10 @@ class Prst1Clob:
         relayer_secret: str,
         relayer_passphrase: str,
     ) -> None:
-        if _V2 and Side is not None:
-            self._buy = Side.BUY
-            self._sell = Side.SELL
-        else:
-            from py_clob_client.clob_types import BUY as _BUY
-            from py_clob_client.clob_types import SELL as _SELL
-
-            self._buy = _BUY
-            self._sell = _SELL
+        self._signature_type = int(signature_type)
+        self._buy = Side.BUY
+        self._sell = Side.SELL
+        self._taker_lock = threading.Lock()
         self.client = ClobClient(
             HOST,
             chain_id=CHAIN_ID,
@@ -109,6 +109,7 @@ class Prst1Clob:
             )
         except Exception as exc:  # noqa: BLE001
             LOGGER.warning("Collateral allowance sync: %s", exc)
+        LOGGER.info("PRST1 CLOB: py_clob_client_v2 host=%s chain=%s", HOST, CHAIN_ID)
 
     def _book_opts(self, token: TokenMarket) -> PartialCreateOrderOptions | None:
         tid = token.token_id
@@ -123,8 +124,64 @@ class Prst1Clob:
         except Exception:
             neg = token.neg_risk
         if tick is None and neg is None:
+            LOGGER.warning(
+                "PRST1 CLOB: missing tick_size/neg_risk for token %s…; market order options omitted",
+                tid[:20],
+            )
             return None
-        return PartialCreateOrderOptions(tick_size=tick, neg_risk=neg if neg is not None else None)
+        return PartialCreateOrderOptions(
+            tick_size=tick,
+            neg_risk=bool(neg) if neg is not None else None,
+        )
+
+    def _create_and_post_market_order(
+        self, margs: MarketOrderArgs, options: PartialCreateOrderOptions | None
+    ) -> dict[str, Any]:
+        create_and_post = getattr(self.client, "create_and_post_market_order", None)
+        if not callable(create_and_post):
+            raise RuntimeError("ClobClient.create_and_post_market_order missing (need py_clob_client_v2)")
+        ot = margs.order_type or OrderType.FAK
+        try:
+            return create_and_post(margs, options=options, order_type=ot)
+        except TypeError:
+            return create_and_post(margs, options=options)
+
+    def wallet_balance_usdc(self) -> float:
+        try:
+            resp = self.client.get_balance_allowance(
+                BalanceAllowanceParams(
+                    asset_type=AssetType.COLLATERAL,
+                    signature_type=self._signature_type,
+                )
+            )
+            return _parse_balance_allowance(resp)
+        except Exception as exc:  # noqa: BLE001
+            LOGGER.debug("wallet_balance_usdc: %s", exc)
+            return 0.0
+
+    def token_balance_allowance_refreshed(self, token_id: str) -> float:
+        try:
+            self.client.update_balance_allowance(
+                BalanceAllowanceParams(
+                    asset_type=AssetType.CONDITIONAL,
+                    token_id=token_id,
+                    signature_type=self._signature_type,
+                )
+            )
+        except Exception as exc:  # noqa: BLE001
+            LOGGER.debug("update_balance_allowance conditional %s: %s", token_id[:16], exc)
+        try:
+            resp = self.client.get_balance_allowance(
+                BalanceAllowanceParams(
+                    asset_type=AssetType.CONDITIONAL,
+                    token_id=token_id,
+                    signature_type=self._signature_type,
+                )
+            )
+            return _parse_balance_allowance(resp)
+        except Exception as exc:  # noqa: BLE001
+            LOGGER.debug("token_balance: %s", exc)
+            return 0.0
 
     def _normalize_side(self, entries: list[Any]) -> list[dict[str, str]]:
         out: list[dict[str, str]] = []
@@ -191,24 +248,22 @@ class Prst1Clob:
         return best
 
     def market_buy_usdc(self, token: TokenMarket, usdc: float) -> dict[str, Any]:
+        u = float(usdc)
+        if u <= 0:
+            raise ValueError("usdc must be > 0")
         opts = self._book_opts(token)
         margs = MarketOrderArgs(
             token_id=token.token_id,
-            amount=float(usdc),
+            amount=u,
             side=self._buy,
             price=0.0,
             order_type=OrderType.FAK,
         )
-        fn = getattr(self.client, "create_and_post_market_order", None)
-        if callable(fn):
-            try:
-                return fn(margs, options=opts, order_type=(margs.order_type or OrderType.FOK))
-            except TypeError:
-                return fn(margs, options=opts)
-        signed = self.client.create_market_order(margs, options=opts)
-        return self.client.post_order(signed, margs.order_type or OrderType.FOK)
+        with self._taker_lock:
+            return self._create_and_post_market_order(margs, options=opts)
 
     def marketable_sell(self, token: TokenMarket, price: float, size: float) -> dict[str, Any]:
+        """Aggressive sell (FAK); matches KNG3 ``place_marketable_sell`` (no book options on limit path)."""
         order = OrderArgs(
             token_id=token.token_id,
             price=round(float(price), 2),
@@ -216,13 +271,19 @@ class Prst1Clob:
             side=self._sell,
         )
         cap = getattr(self.client, "create_and_post_order", None)
-        if callable(cap):
-            try:
-                return cap(order_args=order, options=None, order_type=OrderType.FAK, post_only=False)
-            except TypeError:
-                return cap(order, None, OrderType.FAK)
-        signed = self.client.create_order(order)
-        return self.client.post_order(signed, OrderType.FAK)
+        with self._taker_lock:
+            if callable(cap):
+                try:
+                    return cap(
+                        order_args=order,
+                        options=None,
+                        order_type=OrderType.FAK,
+                        post_only=False,
+                    )
+                except TypeError:
+                    return cap(order, None, OrderType.FAK)
+            signed = self.client.create_order(order)
+            return self.client.post_order(signed, OrderType.FAK)
 
 
 _BINANCE_KLINES = "https://api.binance.com/api/v3/klines"
