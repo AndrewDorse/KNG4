@@ -1,4 +1,4 @@
-"""PRST1 live loop: BTC 15m UP token scalp (tight band vs implied fair)."""
+"""PRST1 live loop: BTC Up/Down UP token scalp (tight band vs implied fair)."""
 
 from __future__ import annotations
 
@@ -6,8 +6,12 @@ import logging
 import time
 from dataclasses import dataclass
 
-from prst1.clob_shim import Prst1Clob, fetch_binance_btcusdt
-from prst1.gamma_market import ActiveContract, discover_active_btc_window
+from prst1.clob_shim import (
+    Prst1Clob,
+    fetch_binance_btcusdt,
+    fetch_binance_window_open_btc,
+)
+from prst1.gamma_market import ActiveContract, TokenMarket, discover_active_btc_window, window_start_ts_from_slug
 from prst1.settings import Prst1Settings
 from prst1.strategy_core import (
     OpenLeg,
@@ -33,39 +37,69 @@ class Prst1LiveEngine:
     def __init__(self, settings: Prst1Settings) -> None:
         self.s = settings
         self._clob = Prst1Clob(
-                private_key=settings.private_key,
-                funder=settings.funder,
-                signature_type=settings.signature_type,
-                relayer_api_key=settings.relayer_api_key,
-                relayer_secret=settings.relayer_secret,
-                relayer_passphrase=settings.relayer_passphrase,
-            )
+            private_key=settings.private_key,
+            funder=settings.funder,
+            signature_type=settings.signature_type,
+            relayer_api_key=settings.relayer_api_key,
+            relayer_secret=settings.relayer_secret,
+            relayer_passphrase=settings.relayer_passphrase,
+        )
         self._w = _WindowState()
+        self._open_up: TokenMarket | None = None
 
-    def _reset_window(self, slug: str) -> None:
-        if self._w.slug != slug:
-            LOGGER.info("PRST1 new window %s", slug)
-        self._w = _WindowState(slug=slug, next_trade_mono=0.0)
+    def _init_start_btc(self, slug: str) -> None:
+        ts = window_start_ts_from_slug(slug)
+        ob: float | None = None
+        if ts is not None:
+            ob = fetch_binance_window_open_btc(
+                symbol=self.s.btc_feed_symbol,
+                window_start_sec=ts,
+                window_minutes=self.s.window_minutes,
+                timeout=self.s.request_timeout_seconds,
+            )
+        if ob is None or ob <= 0:
+            ob = fetch_binance_btcusdt(
+                self.s.request_timeout_seconds, symbol=self.s.btc_feed_symbol
+            )
+        self._w.start_btc = ob
+        LOGGER.info(
+            "PRST1 start_btc=%s slug=%s (window-open kline or spot fallback)",
+            f"{ob:.2f}" if ob else "None",
+            slug,
+        )
 
-    def _flatten(self, c: ActiveContract, reason: str) -> None:
-        if self._w.open_ is None or self._clob is None:
-            self._w.open_ = None
+    def _flatten(self, up: TokenMarket, slug_log: str, reason: str) -> None:
+        if self._w.open_ is None:
+            self._open_up = None
             return
         sh = self._w.open_.shares
         if sh <= 0:
             self._w.open_ = None
+            self._open_up = None
             return
-        bid = self._clob.get_best_bid(c.up.token_id)
+        bid = self._clob.get_best_bid(up.token_id)
         px = max(0.01, min(0.99, (bid or 0.01) - 0.01))
         if self.s.dry_run:
-            LOGGER.info("PRST1 DRY flatten %s sh=%.4f px<=%.2f (%s)", c.slug, sh, px, reason)
+            LOGGER.info(
+                "PRST1 DRY flatten slug=%s sh=%.4f px<=%.2f (%s)",
+                slug_log,
+                sh,
+                px,
+                reason,
+            )
         else:
             try:
-                self._clob.marketable_sell(c.up, px, sh)
-                LOGGER.info("PRST1 sell UP %s sh=%.4f aggressive<=%.2f (%s)", c.slug, sh, px, reason)
+                self._clob.marketable_sell(up, 0.01, sh)
+                LOGGER.info(
+                    "PRST1 sell UP slug=%s sh=%.4f aggressive<=0.01 (%s)",
+                    slug_log,
+                    sh,
+                    reason,
+                )
             except Exception as exc:  # noqa: BLE001
                 LOGGER.exception("PRST1 flatten failed: %s", exc)
         self._w.open_ = None
+        self._open_up = None
 
     def tick_once(self) -> None:
         c = discover_active_btc_window(
@@ -75,24 +109,35 @@ class Prst1LiveEngine:
         )
         if c is None:
             return
-        if self._w.slug != c.slug:
-            self._reset_window(c.slug)
-            self._w.slug = c.slug
+
+        slug_changed = self._w.slug is None or self._w.slug != c.slug
+        if slug_changed:
+            if self._w.open_ is not None and self._open_up is not None:
+                self._flatten(self._open_up, self._w.slug or c.slug, "WINDOW_ROLL")
+            self._w = _WindowState(slug=c.slug, trades=0, next_trade_mono=0.0)
+            self._open_up = None
+            self._init_start_btc(c.slug)
 
         now = time.time()
         rem = c.end_time.timestamp() - now
         if rem <= float(self.s.force_exit_before_end_seconds):
-            self._flatten(c, "force_exit_window")
+            if self._w.open_ is not None and self._open_up is not None:
+                self._flatten(self._open_up, c.slug, "force_exit_window")
             return
 
         up_mid = self._clob.get_midpoint(c.up.token_id)
-        btc = fetch_binance_btcusdt(self.s.request_timeout_seconds)
+        btc = fetch_binance_btcusdt(
+            self.s.request_timeout_seconds, symbol=self.s.btc_feed_symbol
+        )
         if btc is None or up_mid is None:
             return
 
         if self._w.start_btc is None:
-            self._w.start_btc = btc
-            LOGGER.info("PRST1 start_btc=%.2f slug=%s", btc, c.slug)
+            self._init_start_btc(c.slug)
+
+        st = self._w.start_btc
+        if st is None or st <= 0:
+            return
 
         # --- manage open leg ---
         if self._w.open_ is not None:
@@ -100,6 +145,7 @@ class Prst1LiveEngine:
             if mid is None:
                 return
             mono = time.monotonic()
+            up_tok = self._open_up or c.up
             if should_take_profit(
                 open_=self._w.open_,
                 up_mid=mid,
@@ -108,7 +154,7 @@ class Prst1LiveEngine:
             ) or should_time_stop(
                 open_=self._w.open_, now_mono=mono, max_hold_sec=self.s.max_hold_sec
             ):
-                self._flatten(c, "tp_or_time")
+                self._flatten(up_tok, c.slug, "tp_or_time")
                 self._w.next_trade_mono = mono + self.s.cooldown_sec
             return
 
@@ -117,8 +163,7 @@ class Prst1LiveEngine:
             return
         if time.monotonic() < self._w.next_trade_mono:
             return
-        st = self._w.start_btc
-        if st is None:
+        if rem <= float(self.s.new_order_cutoff_seconds):
             return
         if not signal_buy_up(
             up_mid=up_mid,
@@ -137,7 +182,7 @@ class Prst1LiveEngine:
 
         if self.s.dry_run:
             LOGGER.info(
-                "PRST1 DRY BUY signal slug=%s up_mid=%.4f btc=%.2f implied_gap trade#%d est_sh=%.3f entry~%.4f",
+                "PRST1 DRY BUY signal slug=%s up_mid=%.4f btc=%.2f trade#%d est_sh=%.3f entry~%.4f",
                 c.slug,
                 up_mid,
                 btc,
@@ -150,6 +195,7 @@ class Prst1LiveEngine:
                 entry_mono=time.monotonic(),
                 shares=float(f"{est_sh:.4f}"),
             )
+            self._open_up = c.up
             self._w.trades += 1
             return
 
@@ -164,6 +210,7 @@ class Prst1LiveEngine:
             entry_mono=time.monotonic(),
             shares=float(f"{est_sh:.4f}"),
         )
+        self._open_up = c.up
         self._w.trades += 1
         LOGGER.info(
             "PRST1 BUY UP slug=%s notional=%.2f USDC est_sh=%.4f entry_model=%.4f",
@@ -175,12 +222,13 @@ class Prst1LiveEngine:
 
     def run_forever(self) -> None:
         LOGGER.info(
-            "PRST1 engine started dry_run=%s poll=%.2fs band=[%.2f,%.2f] sigma=%.1f",
+            "PRST1 engine started dry_run=%s poll=%.2fs band=[%.2f,%.2f] sigma=%.1f btc=%s",
             self.s.dry_run,
             self.s.poll_interval_seconds,
             self.s.band_lo,
             self.s.band_hi,
             self.s.sigma,
+            self.s.btc_feed_symbol,
         )
         while True:
             try:

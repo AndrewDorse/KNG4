@@ -4,7 +4,7 @@ Live engine for **PRST1** (Polymarket **BTC 15m** Up/Down): tight-band **UP** sc
 
 **Default parameters** match the **1000-window sweep rank #1** profile: `oe=0.065`, `mn=0.065`, band `[0.32,0.68]`, `hold=135`, `σ=130`, `slip=0.008`, `cd=2`, `max=6` trades/window, `$1` notional (`PRST1_NOTIONAL_USD=1`).
 
-This repo is **standalone** from `kng_bot3` / KNG3. Strategy research lived under `kng_bot3` (`PALADIN/sim_pm_btc_scalp_no_settle.py`).
+This repo is **standalone**: **KNG3** ships **SHAMAN v1** only; **KNG4** is the Docker home for **PRST1** (price-difference / tight-band UP scalp). Strategy research lives under `kng_bot3` (`PALADIN/sim_pm_btc_scalp_no_settle.py`).
 
 ## Quick start (local)
 
@@ -39,7 +39,7 @@ Override dry-run for **live** only after you accept risk (still pass `--env-file
 | `POLY_SIGNATURE_TYPE` | Usually `1` |
 | `RELAYER_*` | Optional L2 API creds (same as main bot) |
 | `POLY_DRY_RUN` | `true` = no orders, log only |
-| `PRST1_*` | See `.env.example` |
+| `PRST1_*` | See `.env.example` (includes `PRST1_NEW_ORDER_CUTOFF_SECONDS`, `PRST1_BTC_FEED_SYMBOL`) |
 
 ## Disclaimer
 

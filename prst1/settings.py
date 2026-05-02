@@ -48,7 +48,9 @@ class Prst1Settings:
     poll_interval_seconds: float
     request_timeout_seconds: float
     force_exit_before_end_seconds: int
+    new_order_cutoff_seconds: int
     market_symbol: str
+    btc_feed_symbol: str
     window_minutes: int
     notional_usd: float
     open_edge: float
@@ -81,7 +83,11 @@ class Prst1Settings:
             poll_interval_seconds=_env_float("PRST1_POLL_INTERVAL_SECONDS", 1.0),
             request_timeout_seconds=_env_float("PRST1_REQUEST_TIMEOUT_SECONDS", 12.0),
             force_exit_before_end_seconds=_env_int("PRST1_FORCE_EXIT_BEFORE_END_SECONDS", 20),
+            new_order_cutoff_seconds=max(
+                0, _env_int("PRST1_NEW_ORDER_CUTOFF_SECONDS", 30)
+            ),
             market_symbol=_strip(os.getenv("PRST1_MARKET_SYMBOL")) or "BTC",
+            btc_feed_symbol=(_strip(os.getenv("PRST1_BTC_FEED_SYMBOL")) or "BTCUSDT").upper(),
             window_minutes=_env_int("PRST1_WINDOW_MINUTES", 15),
             notional_usd=_env_float("PRST1_NOTIONAL_USD", 1.0),
             open_edge=_env_float("PRST1_OPEN_EDGE", 0.065),

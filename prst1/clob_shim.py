@@ -156,15 +156,15 @@ class Prst1Clob:
         }
 
     def get_midpoint(self, token_id: str) -> float | None:
-        b = self.get_order_book(token_id)
-        bids, asks = b.get("bids") or [], b.get("asks") or []
-        if not bids or not asks:
-            return None
-        bb = float(bids[0].get("price", 0))
-        ba = float(asks[0].get("price", 0))
-        if bb <= 0 or ba <= 0:
-            return None
-        return (bb + ba) / 2.0
+        bb = self.get_best_bid(token_id)
+        ba = self.get_best_ask(token_id)
+        if bb is not None and ba is not None and bb > 0 and ba > 0:
+            return (bb + ba) / 2.0
+        if ba is not None and ba > 0:
+            return float(ba)
+        if bb is not None and bb > 0:
+            return float(bb)
+        return None
 
     def get_best_bid(self, token_id: str) -> float | None:
         b = self.get_order_book(token_id)
@@ -225,12 +225,56 @@ class Prst1Clob:
         return self.client.post_order(signed, OrderType.FAK)
 
 
-def fetch_binance_btcusdt(timeout: float) -> float | None:
+_BINANCE_KLINES = "https://api.binance.com/api/v3/klines"
+
+
+def _binance_interval_for_window(window_minutes: int) -> str:
+    wm = int(window_minutes)
+    if wm <= 5:
+        return "5m"
+    if wm <= 15:
+        return "15m"
+    return "15m"
+
+
+def fetch_binance_btcusdt(timeout: float, *, symbol: str = "BTCUSDT") -> float | None:
     url = "https://api.binance.com/api/v3/ticker/price"
     try:
-        r = requests.get(url, params={"symbol": "BTCUSDT"}, timeout=timeout)
+        r = requests.get(url, params={"symbol": symbol.upper()}, timeout=timeout)
         r.raise_for_status()
         return float(r.json()["price"])
     except (requests.RequestException, KeyError, ValueError, TypeError) as exc:
         LOGGER.warning("Binance BTC price: %s", exc)
+        return None
+
+
+def fetch_binance_window_open_btc(
+    *,
+    symbol: str,
+    window_start_sec: int,
+    window_minutes: int,
+    timeout: float,
+) -> float | None:
+    """Candle **open** at ``window_start_sec`` (aligns PM slug epoch with Binance kline open)."""
+    try:
+        start_ms = int(window_start_sec) * 1000
+        interval = _binance_interval_for_window(window_minutes)
+        r = requests.get(
+            _BINANCE_KLINES,
+            params={
+                "symbol": symbol.upper(),
+                "interval": interval,
+                "startTime": start_ms,
+                "limit": 1,
+            },
+            timeout=timeout,
+        )
+        r.raise_for_status()
+        rows = r.json()
+        if not rows:
+            return None
+        o = float(rows[0][1])
+        return o if o > 0 else None
+    except (requests.RequestException, IndexError, KeyError, ValueError, TypeError) as exc:
+        LOGGER.warning("Binance kline open: %s", exc)
         return None

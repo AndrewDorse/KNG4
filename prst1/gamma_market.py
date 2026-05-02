@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
@@ -12,6 +13,11 @@ import requests
 
 LOGGER = logging.getLogger("prst1")
 GAMMA_URL = "https://gamma-api.polymarket.com"
+
+
+def window_start_ts_from_slug(slug: str) -> int | None:
+    m = re.search(r"-(\d+)$", (slug or "").strip())
+    return int(m.group(1)) if m else None
 
 
 def _parse_dt(raw: Any) -> datetime | None:
