@@ -18,7 +18,9 @@ Tight-band **UP** scalp when Binance-implied fair exceeds the CLOB UP mid by `PR
 | **Collateral pre-buy** | `wallet_balance_usdc()` must exceed `notional × 1.02` or buy is skipped. |
 | **Exit size** | Sell size = `min(ledger_shares, token_balance_allowance_refreshed)` to avoid oversell. |
 
-**KNG3** remains **SHAMAN v1** only; **KNG4** is this PRST1 image.
+**KNG3** remains **SHAMAN v1** only; **KNG4** is this PRST1 image. **Strategy-1** (streak12_cheap19: 12s skew then cheap leg, **$1** one-shot per slug) ships in **KNG6** (`KNG6_STREAK_SECONDS=12`, `KNG6_SKEW_THR=0.76`, `KNG6_CHEAP_THR=0.19`) — not in this repo.
+
+Canonical cross-repo notes from `kng_bot3`: `docs/Git/KNG4.md`.
 
 ## Quick start (local)
 
