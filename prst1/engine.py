@@ -11,7 +11,7 @@ from prst1.clob_shim import (
     fetch_binance_btcusdt,
     fetch_binance_window_open_btc,
 )
-from prst1.gamma_market import ActiveContract, TokenMarket, discover_active_btc_window, window_start_ts_from_slug
+from prst1.gamma_market import TokenMarket, discover_active_btc_window, window_start_ts_from_slug
 from prst1.settings import Prst1Settings
 from prst1.strategy_core import (
     OpenLeg,
