@@ -1,4 +1,4 @@
-"""PRST1 live loop: one lane per window length (e.g. 5m + 15m BTC up/down in parallel)."""
+"""PRST1 live loop: one lane per window length (default 15m only; optional 5m+15m via PRST1_WINDOW_MINUTES)."""
 
 from __future__ import annotations
 
@@ -35,7 +35,7 @@ class _WindowState:
 
 @dataclass
 class _LaneState:
-    """One PM window length (5m or 15m): at most one open UP leg; up to N completed entries per slug."""
+    """One PM window length (e.g. 15m): at most one open UP leg; up to N completed entries per slug."""
 
     w: _WindowState
     open_up: TokenMarket | None = None

@@ -1,10 +1,10 @@
 # KNG4 — PRST1
 
-Live engine for **PRST1** (Polymarket **BTC** Up/Down): by default **5m and 15m windows run in parallel** (separate Gamma slugs, separate state). Each lane keeps **at most one open UP position**, **`PRST1_NOTIONAL_USD` per entry** (default **$1**), and allows the next entry after TP or timeout until **`PRST1_MAX_TRADES_PER_WINDOW`** (default **10**) entries per window slug.
+Live engine for **PRST1** (Polymarket **BTC** Up/Down): by default **15m windows only** (one lane). Set `PRST1_WINDOW_MINUTES=5,15` to run **5m and 15m** in parallel again (separate Gamma slugs, separate state). Each lane keeps **at most one open UP position**, **`PRST1_NOTIONAL_USD` per entry** (default **$1**), and allows the next entry after TP or timeout until **`PRST1_MAX_TRADES_PER_WINDOW`** (default **10**) entries per window slug.
 
 Tight-band **UP** scalp when Binance-implied fair exceeds the CLOB UP mid by `PRST1_OPEN_EDGE`, with take-profit / time-stop matching the research sim (`PALADIN/sim_pm_btc_scalp_no_settle.py`).
 
-**Defaults:** `oe=0.065`, **`PRST1_MIN_NET=0.12` (12¢ TP gate)**, band `[0.32,0.68]`, `hold=135`, `σ=130`, `slip=0.008`, `cd=2`, max **10** trades/window **per lane**, **`$1`** notional. Set `PRST1_WINDOW_MINUTES=15` for 15m-only.
+**Defaults:** `oe=0.065`, **`PRST1_MIN_NET=0.12` (12¢ TP gate)**, band `[0.32,0.68]`, `hold=135`, `σ=130`, `slip=0.008`, `cd=2`, max **10** trades/window **per lane**, **`$1`** notional, **`PRST1_WINDOW_MINUTES=15`** (15m-only).
 
 ## CLOB & feeds (trade-related)
 

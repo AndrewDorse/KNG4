@@ -37,10 +37,10 @@ def _env_bool(name: str, default: bool) -> bool:
 
 
 def _parse_window_minutes_list(raw: str | None) -> tuple[int, ...]:
-    """Comma-separated window lengths, e.g. ``5,15`` → simultaneous 5m and 15m BTC up/down."""
+    """Comma-separated window lengths, e.g. ``15`` or ``5,15`` for multiple BTC up/down lanes."""
     s = _strip(raw)
     if not s:
-        return (5, 15)
+        return (15,)
     out: list[int] = []
     for part in s.split(","):
         p = part.strip()
@@ -57,7 +57,7 @@ def _parse_window_minutes_list(raw: str | None) -> tuple[int, ...]:
         if v not in out:
             out.append(v)
     if not out:
-        return (5, 15)
+        return (15,)
     return tuple(out)
 
 

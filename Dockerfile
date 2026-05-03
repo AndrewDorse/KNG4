@@ -1,4 +1,4 @@
-# KNG4 — PRST1 Polymarket BTC up/down scalp (default 5m+15m lanes, dry-run capable). Strategy-1 streak→cheap is KNG6, not this image.
+# KNG4 — PRST1 Polymarket BTC up/down scalp (default 15m-only lane; dry-run capable). Strategy-1 streak→cheap is KNG6, not this image.
 FROM python:3.12-slim-bookworm
 
 WORKDIR /app
