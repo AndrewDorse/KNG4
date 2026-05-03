@@ -108,8 +108,8 @@ class Prst1Clob:
                 )
             )
         except Exception as exc:  # noqa: BLE001
-            LOGGER.warning("Collateral allowance sync: %s", exc)
-        LOGGER.info("PRST1 CLOB: py_clob_client_v2 host=%s chain=%s", HOST, CHAIN_ID)
+            LOGGER.debug("Collateral allowance sync: %s", exc)
+        LOGGER.debug("PRST1 CLOB: py_clob_client_v2 host=%s chain=%s", HOST, CHAIN_ID)
 
     def _book_opts(self, token: TokenMarket) -> PartialCreateOrderOptions | None:
         tid = token.token_id
@@ -124,7 +124,7 @@ class Prst1Clob:
         except Exception:
             neg = token.neg_risk
         if tick is None and neg is None:
-            LOGGER.warning(
+            LOGGER.debug(
                 "PRST1 CLOB: missing tick_size/neg_risk for token %s…; market order options omitted",
                 tid[:20],
             )
@@ -305,7 +305,7 @@ def fetch_binance_btcusdt(timeout: float, *, symbol: str = "BTCUSDT") -> float |
         r.raise_for_status()
         return float(r.json()["price"])
     except (requests.RequestException, KeyError, ValueError, TypeError) as exc:
-        LOGGER.warning("Binance BTC price: %s", exc)
+        LOGGER.debug("Binance BTC price: %s", exc)
         return None
 
 
@@ -337,5 +337,5 @@ def fetch_binance_window_open_btc(
         o = float(rows[0][1])
         return o if o > 0 else None
     except (requests.RequestException, IndexError, KeyError, ValueError, TypeError) as exc:
-        LOGGER.warning("Binance kline open: %s", exc)
+        LOGGER.debug("Binance kline open: %s", exc)
         return None

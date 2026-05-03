@@ -22,13 +22,15 @@ if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
 from prst1.strategy_core import (
+    OpenLeg,
+    Side,
     buy_limit_proxy,
     implied_up,
     sell_limit_proxy,
     should_take_profit,
     signal_buy_up,
+    signal_either_cheap,
 )
-from prst1.strategy_core import OpenLeg
 
 
 @dataclass(slots=True)
@@ -73,6 +75,7 @@ def load_tape(path: Path) -> tuple[str, list[Row]]:
 def replay(
     rows: list[Row],
     *,
+    entry_mode: str,
     open_edge: float,
     min_net: float,
     band_lo: float,
@@ -96,7 +99,7 @@ def replay(
     lines.append("")
     lines.append(
         "params: "
-        f"open_edge={open_edge} min_net={min_net} band=[{band_lo},{band_hi}] "
+        f"entry_mode={entry_mode} open_edge={open_edge} min_net={min_net} band=[{band_lo},{band_hi}] "
         f"sigma={sigma} slip={slip} max_hold_sec={max_hold_sec} max_trades={max_trades} "
         f"cooldown_sec={cooldown_sec} force_exit_remaining<={force_exit_rem} notional_usd={notional_usd}"
     )
@@ -115,9 +118,13 @@ def replay(
             f"implied_up={imp:.4f}  (implied-up)={gap:+.4f}  |  {extra}"
         )
 
+    def _mid_for_pos(pr: Row) -> float:
+        assert pos is not None
+        return pr.up if pos.side == "UP" else pr.dn
+
     for r in rows:
         if r.rem <= force_exit_rem and pos is not None:
-            sp = sell_limit_proxy(r.up, slip)
+            sp = sell_limit_proxy(_mid_for_pos(r), slip)
             net = sp - pos.entry_buy
             lines.append(
                 line_action(
@@ -132,15 +139,16 @@ def replay(
             continue
 
         if pos is not None:
+            pmid = _mid_for_pos(r)
             tp = should_take_profit(
-                open_=pos, up_mid=r.up, slip=slip, min_net=min_net
+                open_=pos, position_mid=pmid, slip=slip, min_net=min_net
             )
             elapsed_leg = float(r.el) - (
                 pos.entry_mono
             )  # OpenLeg.entry_mono stores ENTRY ELAPSED for replay
             tstop = elapsed_leg >= max_hold_sec
             if tp or tstop:
-                sp = sell_limit_proxy(r.up, slip)
+                sp = sell_limit_proxy(pmid, slip)
                 net = sp - pos.entry_buy
                 why = "TAKE_PROFIT" if tp else "TIME_STOP"
                 lines.append(
@@ -160,27 +168,42 @@ def replay(
             continue
         if r.el < next_buy_el:
             continue
-        if not signal_buy_up(
-            up_mid=r.up,
-            btc=r.btc,
-            start_btc=start_btc,
-            sigma=sigma,
-            open_edge=open_edge,
-            band_lo=band_lo,
-            band_hi=band_hi,
-        ):
-            continue
+        side: Side | None = None
+        if entry_mode.upper() == "TIGHT_BAND_UP":
+            if not signal_buy_up(
+                up_mid=r.up,
+                btc=r.btc,
+                start_btc=start_btc,
+                sigma=sigma,
+                open_edge=open_edge,
+                band_lo=band_lo,
+                band_hi=band_hi,
+            ):
+                continue
+            side = "UP"
+        else:
+            side = signal_either_cheap(
+                up_mid=r.up,
+                down_mid=r.dn,
+                btc=r.btc,
+                start_btc=start_btc,
+                sigma=sigma,
+                open_edge=open_edge,
+            )
+            if side is None:
+                continue
 
-        eb = buy_limit_proxy(r.up, slip)
-        est_sh = notional_usd / max(r.up, 0.01)
+        mid = r.up if side == "UP" else r.dn
+        eb = buy_limit_proxy(mid, slip)
+        est_sh = notional_usd / max(mid, 0.01)
         lines.append(
             line_action(
                 "BUY",
                 r,
-                f"open_UP  model_entry_buy={eb:.4f}  est_shares={est_sh:.4f}  (spend~${notional_usd:.2f})",
+                f"open_{side}  model_entry_buy={eb:.4f}  est_shares={est_sh:.4f}  (spend~${notional_usd:.2f})",
             )
         )
-        pos = OpenLeg(entry_buy=eb, entry_mono=float(r.el), shares=est_sh)
+        pos = OpenLeg(entry_buy=eb, entry_mono=float(r.el), shares=est_sh, side=side)
         trades += 1
 
     lines.append("")
@@ -191,6 +214,13 @@ def replay(
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--csv", type=Path, required=True, help="public *_prices.csv for one 15m window")
+    ap.add_argument(
+        "--entry-mode",
+        type=str,
+        default="EITHER_CHEAP",
+        choices=("EITHER_CHEAP", "TIGHT_BAND_UP"),
+        help="EITHER_CHEAP (UP or DOWN) or TIGHT_BAND_UP (band-gated UP only)",
+    )
     ap.add_argument("--open-edge", type=float, default=0.065)
     ap.add_argument("--min-net", type=float, default=0.065)
     ap.add_argument("--band-lo", type=float, default=0.32)
@@ -210,6 +240,7 @@ def main() -> int:
     slug, rows = load_tape(path)
     lines = replay(
         rows,
+        entry_mode=args.entry_mode,
         open_edge=args.open_edge,
         min_net=args.min_net,
         band_lo=args.band_lo,

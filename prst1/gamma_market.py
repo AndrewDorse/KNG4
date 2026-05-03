@@ -85,7 +85,7 @@ def discover_active_btc_window(
         r.raise_for_status()
         markets = r.json()
     except requests.RequestException as exc:
-        LOGGER.warning("Gamma request failed: %s", exc)
+        LOGGER.debug("Gamma request failed: %s", exc)
         return None
     if not markets:
         LOGGER.debug("No market for slug %s", slug)

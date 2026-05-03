@@ -24,7 +24,8 @@ def main() -> int:
     # Importing engine loads ``clob_shim`` → ``py_clob_client_v2`` (fails fast if missing).
     print(
         f"PRST1 boot: CLOB=py_clob_client_v2 | lanes={settings.window_minutes_list} "
-        f"min_net={settings.min_net} notional=${settings.notional_usd:.2f} dry_run={settings.dry_run}",
+        f"entry_mode={settings.entry_mode} min_net={settings.min_net} "
+        f"notional=${settings.notional_usd:.2f} dry_run={settings.dry_run}",
         flush=True,
     )
     Prst1LiveEngine(settings).run_forever()

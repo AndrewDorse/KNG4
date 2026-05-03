@@ -4,6 +4,9 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
+from typing import Literal
+
+Side = Literal["UP", "DOWN"]
 
 
 def implied_up(btc: float, start_btc: float, sigma: float) -> float:
@@ -27,6 +30,28 @@ def signal_buy_up(
     return (imp - up_mid) >= open_edge
 
 
+def signal_either_cheap(
+    *,
+    up_mid: float,
+    down_mid: float,
+    btc: float,
+    start_btc: float,
+    sigma: float,
+    open_edge: float,
+) -> Side | None:
+    """Pick UP or DOWN by larger mispricing vs BTC-implied fair (same as PALADIN ``entry_either_cheap``)."""
+    imp = implied_up(btc, start_btc, sigma)
+    eu = imp - up_mid
+    ed = (1.0 - imp) - down_mid
+    if eu >= open_edge and ed >= open_edge:
+        return "UP" if eu >= ed else "DOWN"
+    if eu >= open_edge:
+        return "UP"
+    if ed >= open_edge:
+        return "DOWN"
+    return None
+
+
 def buy_limit_proxy(up_mid: float, slip: float) -> float:
     return min(up_mid + slip, 0.995)
 
@@ -37,15 +62,16 @@ def sell_limit_proxy(up_mid: float, slip: float) -> float:
 
 @dataclass(slots=True)
 class OpenLeg:
-    """Synthetic open UP leg for exit checks (mid + slip model)."""
+    """Open leg: ``side`` UP or DOWN; exit uses outcome token mid + slip model."""
 
     entry_buy: float
     entry_mono: float
     shares: float
+    side: Side = "UP"
 
 
-def should_take_profit(*, open_: OpenLeg, up_mid: float, slip: float, min_net: float) -> bool:
-    sp = sell_limit_proxy(up_mid, slip)
+def should_take_profit(*, open_: OpenLeg, position_mid: float, slip: float, min_net: float) -> bool:
+    sp = sell_limit_proxy(position_mid, slip)
     return (sp - open_.entry_buy) >= min_net
 
 
