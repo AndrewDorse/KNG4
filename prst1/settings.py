@@ -67,7 +67,8 @@ def _parse_window_minutes_list(raw: str | None) -> tuple[int, ...]:
 
 
 def _parse_entry_mode(raw: str | None) -> str:
-    s = (_strip(raw) or "EITHER_CHEAP").upper().replace("-", "_")
+    # Default UP-only band gate; EITHER_CHEAP is experimental (tape overfit risk).
+    s = (_strip(raw) or "TIGHT_BAND_UP").upper().replace("-", "_")
     if s in ("EITHER_CHEAP", "TIGHT_BAND_UP"):
         return s
     raise Prst1ConfigError(
@@ -132,16 +133,16 @@ class Prst1Settings:
             window_minutes_list=_parse_window_minutes_list(os.getenv("PRST1_WINDOW_MINUTES")),
             entry_mode=_parse_entry_mode(os.getenv("PRST1_ENTRY_MODE")),
             notional_usd=_env_float("PRST1_NOTIONAL_USD", 1.0),
-            open_edge=_env_float("PRST1_OPEN_EDGE", 0.028),
-            min_net=_env_float("PRST1_MIN_NET", 0.008),
+            open_edge=_env_float("PRST1_OPEN_EDGE", 0.065),
+            min_net=_env_float("PRST1_MIN_NET", 0.10),
             band_lo=_env_float("PRST1_BAND_LO", 0.32),
             band_hi=_env_float("PRST1_BAND_HI", 0.68),
-            sigma=_env_float("PRST1_SIGMA_BTC", 110.0),
-            slip_model=_env_float("PRST1_SLIP_MODEL", 0.002),
-            max_hold_sec=_env_float("PRST1_MAX_HOLD_SEC", 100.0),
+            sigma=_env_float("PRST1_SIGMA_BTC", 130.0),
+            slip_model=_env_float("PRST1_SLIP_MODEL", 0.008),
+            max_hold_sec=_env_float("PRST1_MAX_HOLD_SEC", 135.0),
             max_trades_per_window=max(
-                1, min(50, _env_int("PRST1_MAX_TRADES_PER_WINDOW", 50))
+                1, min(50, _env_int("PRST1_MAX_TRADES_PER_WINDOW", 10))
             ),
-            cooldown_sec=max(0.0, _env_float("PRST1_COOLDOWN_SEC", 0.0)),
+            cooldown_sec=max(0.0, _env_float("PRST1_COOLDOWN_SEC", 2.0)),
             log_level=_strip(os.getenv("PRST1_LOG_LEVEL")) or "WARNING",
         )
